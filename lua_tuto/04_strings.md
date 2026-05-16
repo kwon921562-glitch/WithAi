@@ -112,12 +112,12 @@ local msg = string.format("[%s] Damage: %d (%.1f%%)", "CRIT", 150, 12.5)
 -- "[CRIT] Damage: 150 (12.5%)"
 ```
 
-## string.find — 검색
+## string.find — 위치 검색 (인덱스가 필요할 때)
 
 ```lua
 local s = "Hello, World!"
 
--- 단순 검색
+-- 단순 검색: 시작/끝 인덱스 반환
 local start, finish = string.find(s, "World")
 print(start, finish)   -- 8  12
 
@@ -126,8 +126,30 @@ local start, finish = string.find(s, "%a+")   -- 첫 번째 단어
 print(start, finish)   -- 1  5
 
 -- plain 모드 (패턴 해석 안 함)
-local start = string.find(s, ".", 1, true)  -- 4번째 인자 = plain
-print(start)           -- nil (. 은 패턴에서 아무 문자)
+-- 패턴 특수문자를 "문자 그대로" 찾고 싶을 때 사용
+local text = "price = 9.99"
+local dotPos = string.find(text, ".", 1, true)  -- 4번째 인자 = plain
+print(dotPos)         -- 10
+
+-- 시작 위치 지정 (3번째 인자)
+local s2 = "cat dog cat"
+print(string.find(s2, "cat"))       -- 1 3
+print(string.find(s2, "cat", 2))    -- 9 11
+```
+
+### find vs match 빠른 기준
+
+- `string.find`: "어디에 있는지"(시작/끝 인덱스) 알고 싶을 때
+- `string.match`: "무엇이 매칭됐는지"(문자열/캡처값) 뽑고 싶을 때
+
+```lua
+local s = "HP=120"
+
+local i, j = string.find(s, "%d+")
+print(i, j)                         -- 4 6
+
+local num = string.match(s, "%d+")
+print(num)                          -- "120"
 ```
 
 ## 패턴 매칭 — 정규식이 아니다! ⚠️
@@ -156,7 +178,7 @@ Lua는 자체 패턴 시스템을 사용한다. 정규식보다 단순하지만 
 -- 그룹은 () (동일)
 ```
 
-### string.match — 추출
+### string.match — 첫 번째 매치 추출
 
 ```lua
 -- 숫자 추출
@@ -166,9 +188,21 @@ print(year, month, day)   -- 2024  01  15
 -- 파일 이름/확장자 분리
 local name, ext = string.match("sprite.png", "(.+)%.(%w+)")
 print(name, ext)          -- sprite  png
+
+-- 캡처가 없으면 "매치된 전체 문자열" 반환
+local whole = string.match("id=AB-12", "%u%u%-%d%d")
+print(whole)              -- "AB-12"
+
+-- 캡처가 있으면 캡처들만 반환
+local left, right = string.match("id=AB-12", "(%u%u)%-(%d%d)")
+print(left, right)        -- AB  12
+
+-- 매치 실패 시 nil
+local v = string.match("hello", "%d+")
+print(v)                  -- nil
 ```
 
-### string.gmatch — 반복 추출
+### string.gmatch — 모든 매치 반복 추출 (iterator)
 
 ```lua
 -- 모든 단어 추출
@@ -182,7 +216,65 @@ local values = {}
 for num in string.gmatch(csv, "(%d+)") do
     values[#values + 1] = tonumber(num)
 end
+
+-- 로그에서 key=value 쌍 추출
+local logLine = "stage=3 wave=12 hp=85 score=10900"
+local kv = {}
+for k, v in string.gmatch(logLine, "(%a+)=(%w+)") do
+    kv[k] = v
+end
+-- kv.stage == "3", kv.wave == "12", kv.hp == "85"
+
+-- 좌표 목록 파싱: "(10,20) (30,40)"
+local points = {}
+for x, y in string.gmatch("(10,20) (30,40)", "%((%-?%d+),(%-?%d+)%)") do
+    points[#points + 1] = { x = tonumber(x), y = tonumber(y) }
+end
 ```
+
+### string.gfind 는?
+
+Lua 5.1.5 학습 자료를 보면 `string.gfind`가 보일 때가 있다.
+
+- 현재 표준 문법은 `string.gmatch`
+- `string.gfind`는 구버전 코드 또는 일부 호환 빌드에서만 보이는 이름
+- 실무/신규 코드에서는 `gmatch`만 사용하면 된다
+
+```lua
+-- 권장
+for token in string.gmatch("a,b,c", "[^,]+") do
+    print(token)
+end
+
+-- 구문서에서 gfind를 봤다면 이렇게 읽으면 된다:
+-- "gfind == gmatch(호환 별칭)"
+```
+
+### find / match / gmatch 선택 가이드
+
+```lua
+local line = "enemy#42 hp=150 pos=(12,-3)"
+
+-- 1) 위치가 필요하면 find
+local hs, he = string.find(line, "hp=%d+")
+print(hs, he)
+
+-- 2) 값 1개(첫 매치)만 필요하면 match
+local hp = string.match(line, "hp=(%d+)")
+print(hp)                 -- "150"
+
+-- 3) 여러 개를 전부 순회하면 gmatch
+for num in string.gmatch(line, "%d+") do
+    print(num)            -- 42, 150, 12, 3
+end
+```
+
+### 자주 하는 실수
+
+- `find` 결과를 문자열로 착각: `find`는 기본적으로 인덱스를 반환
+- `%` 이스케이프 누락: 예) 점(`.`)을 문자 그대로 찾으려면 `%.` 또는 `plain=true`
+- `gmatch`에서 수정/삭제를 동시에 하려는 패턴: 순회 중 원본 문자열 변경 로직은 피하고, 결과를 별도 테이블에 수집
+- `gfind`를 최신 API로 오해: 문서/강의가 오래된 경우가 많다
 
 ### string.gsub — 치환
 

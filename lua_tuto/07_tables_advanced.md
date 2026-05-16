@@ -65,6 +65,101 @@ print(a.pos.x)       -- 0 (완전 독립)
 -- ⚠️ 순환 참조가 있으면 무한 루프! 실전에서는 visited 테이블 추가 필요
 ```
 
+## pairs / ipairs 실제 구현 관점
+
+좋은 질문이다. `pairs`와 `ipairs`를 내부 형태로 보면 generic `for`가 명확해진다.
+
+- 실제 표준 라이브러리는 C로 구현되어 있다
+- 아래 코드는 Lua 5.1.5 기준 "동작 의미"를 보여주는 축약 구현이다
+
+### 1) pairs는 `next`를 그대로 넘긴다
+
+```lua
+-- 개념적으로 pairs(t)는 아래와 거의 같다
+local function pairs_like(t)
+    return next, t, nil
+end
+
+local player = {name = "Hero", hp = 100, mp = 50}
+for k, v in pairs_like(player) do
+    print(k, v)
+end
+```
+
+generic `for`는 내부적으로 이런 흐름으로 돈다.
+
+```lua
+local iter, state, ctrl = pairs_like(player)  -- iter=next, state=player, ctrl=nil
+while true do
+    local k, v = iter(state, ctrl)             -- next(player, ctrl)
+    ctrl = k
+    if ctrl == nil then break end
+    print(k, v)
+end
+```
+
+핵심: `pairs`는 "테이블 전체 키"를 `next`로 순회한다. 순서는 보장되지 않는다.
+
+### 2) ipairs는 숫자 인덱스 1부터 연속 순회
+
+```lua
+-- Lua 5.1의 의미를 보존한 축약 구현
+local function ipairsIter(t, i)
+    i = i + 1
+    local v = t[i]
+    if v ~= nil then
+        return i, v
+    end
+    -- nil이면 반복 종료
+end
+
+local function ipairs_like(t)
+    return ipairsIter, t, 0
+end
+
+local arr = {"a", "b", "c"}
+for i, v in ipairs_like(arr) do
+    print(i, v)   -- 1 a, 2 b, 3 c
+end
+```
+
+핵심: `ipairs`는 `1,2,3...`으로 진행하다가 `nil`을 만나면 즉시 멈춘다.
+
+```lua
+local t = {10, 20, nil, 40}
+for i, v in ipairs_like(t) do
+    print(i, v)   -- 1 10, 2 20 까지만 출력
+end
+```
+
+### 3) 왜 이게 중요한가?
+
+- `pairs`: 딕셔너리/셋/혼합 테이블 순회용
+- `ipairs`: 연속 배열 순회용
+- 중간 `nil`이 가능한 데이터(삭제가 섞인 배열)는 `ipairs`에서 일부가 누락될 수 있다
+
+게임 코드에서는 의도에 따라 아래처럼 고른다.
+
+```lua
+-- 연속 배열 보장: ipairs
+for i, enemy in ipairs(enemies) do
+    enemy:update(dt)
+end
+
+-- 키 중심 데이터: pairs
+for tag, enabled in pairs(tags) do
+    if enabled then
+        -- ...
+    end
+end
+```
+
+### 4) Lua 5.1.5 기준 주의점
+
+- `pairs` 순서는 실행마다 달라질 수 있다 (정렬이 필요하면 키를 모아 sort)
+- `ipairs`는 연속 정수 인덱스 구간만 본다
+- `#t`와 `ipairs`는 "중간 nil" 테이블에서 직관과 다르게 동작할 수 있다
+
 ## 테이블을 스택/큐로 사용
 
 ```lua
@@ -195,6 +290,8 @@ end
 ```
 
 ## 약한 테이블 (Weak Tables)
+
+`setmetatable`의 기본 동작과 `__index/__newindex`는 [08. 메타테이블](08_metatables.md)에서 먼저 확인하면 이해가 훨씬 쉽다.
 
 ```lua
 -- 약한 참조: GC가 다른 곳에서 참조가 없으면 수거 가능

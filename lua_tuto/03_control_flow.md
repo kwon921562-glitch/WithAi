@@ -103,6 +103,99 @@ end
 -- 3. 루프 변수를 루프 안에서 수정해도 반복 횟수에 영향 없음
 ```
 
+## 클로저(Closure) 먼저 이해하기
+
+제네릭 `for`를 이해하려면 먼저 클로저를 알아야 한다.
+
+- 클로저: 함수를 만들 때, 그 함수 바깥의 local 변수를 "캡처"해서 계속 기억하는 함수
+- C#의 람다 캡처와 거의 같은 개념
+
+```lua
+-- 카운터 생성기: 호출할 때마다 1씩 증가
+local function makeCounter(start)
+    local n = start or 0   -- 이 local이 캡처된다
+
+    return function()
+        n = n + 1
+        return n
+    end
+end
+
+local c1 = makeCounter(10)
+print(c1())   -- 11
+print(c1())   -- 12
+
+local c2 = makeCounter(100)
+print(c2())   -- 101 (c1과 상태 분리)
+```
+
+핵심은 "함수 + 숨겨진 상태(local 변수)"를 한 묶음으로 다룬다는 점이다.
+
+> `pairs/ipairs`의 축약 구현(내부 동작)은 [07. 테이블 심화](07_tables_advanced.md)의
+> `pairs / ipairs 실제 구현 관점` 섹션에서 자세히 다룬다.
+
+## 반복자(Iterator)란?
+
+반복자는 "다음 값을 하나씩 만들어내는 규칙"이다.
+
+- 가장 단순한 형태: 호출할 때마다 다음 값을 반환하는 함수
+- Lua 제네릭 `for`는 이 반복자 함수를 반복 호출해서 순회한다
+
+```lua
+-- 1부터 n까지 반환하는 반복자 팩토리
+local function range(n)
+    local i = 0
+
+    return function()
+        i = i + 1
+        if i <= n then
+            return i
+        end
+        -- nil 반환 시 반복 종료
+    end
+end
+
+local nextNum = range(3)
+print(nextNum())   -- 1
+print(nextNum())   -- 2
+print(nextNum())   -- 3
+print(nextNum())   -- nil (종료)
+```
+
+위 예제에서 `i`를 기억하는 힘이 바로 클로저다.
+
+## 제네릭 for의 실제 형태
+
+문법:
+
+```lua
+for a, b in expr do
+    -- body
+end
+```
+
+`expr`는 내부적으로 3가지를 만들어낸다.
+
+- 반복자 함수(iterator function)
+- 불변 상태(state)
+- 제어 변수(control variable, 이전 값)
+
+개념적으로는 아래 흐름과 같다.
+
+```lua
+local iter, state, ctrl = expr
+while true do
+    local a, b = iter(state, ctrl)
+    ctrl = a
+    if ctrl == nil then
+        break
+    end
+    -- body (a, b 사용)
+end
+```
+
+즉, 제네릭 `for`는 "반복자를 계속 호출하고 nil이 나오면 종료"하는 문법 설탕이다.
+
 ## for 루프 — 제네릭 (이터레이터)
 
 ```lua
@@ -122,6 +215,15 @@ end
 -- ipairs ≈ for (int i = 0; i < list.Count; i++)
 -- pairs  ≈ foreach (var kvp in dictionary)
 ```
+
+### 여기까지의 핵심만 기억하자
+
+- `for ... in`은 "반복자 함수 + 상태 + 제어변수"를 반복 호출한다
+- 반환값의 첫 값이 `nil`이면 루프가 끝난다
+- `ipairs`는 연속 숫자 인덱스용, `pairs`는 전체 키 순회용
+
+구현 디테일(`next`, custom iterator, 중간 `nil` 함정)은
+[07. 테이블 심화](07_tables_advanced.md)에서 심화 학습한다.
 
 ## break (continue 없음)
 
